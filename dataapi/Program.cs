@@ -1,17 +1,12 @@
-﻿//using Microsoft.AspNetCore.OData;
-//using Microsoft.OData.ModelBuilder;
+﻿using DataApi.Data;
 using DataApi.Models;
+using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
-builder.Services.AddSingleton<SingletonAssets>();
+builder.Services.AddSingleton<SingletonDatastore>();
 
-//var modelBuilder = new ODataConventionModelBuilder();
-//modelBuilder.EntitySet<Asset>("Assets");
-
-//builder.Services.AddControllers().AddOData(
-//    options => options.Select().Filter().OrderBy().Expand().Count().SetMaxTop(null).AddRouteComponents(
-//        "odata",
-//        modelBuilder.GetEdmModel()));
+// Add sql dbcontext
+builder.Services.AddDbContext<SalesDb>(options => options.UseSqlServer(builder.Configuration.GetConnectionString("SalesDbConnection")));
 
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
@@ -26,51 +21,64 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
-
 var app = builder.Build();
 
-//if (app.Environment.IsDevelopment())
-//{
 app.UseSwagger();
 app.UseSwaggerUI();
-//}
 
-//app.UseRouting();
+app.UseRouting();
 
-//app.UseEndpoints(endpoints => endpoints.MapControllers());
-
-
-app.MapGet("/assets", (SingletonAssets singletonAssets) => singletonAssets.Assets)
+// ------ Minimal API Routes -------
+// -- Assets --
+app.MapGet("/assets",
+    (
+        string countryName,
+        string accountName,
+        string state,
+        SalesDb db) =>
+{
+    var results = db.Assets.AsQueryable();
+    if (!string.IsNullOrEmpty(countryName))
+    {
+        results = results.Where(r => r.Country.ToUpper().Contains(countryName.ToUpper()));
+    }
+    if (!string.IsNullOrEmpty(accountName))
+    {
+        results = results.Where(r => r.AccountName.ToUpper().Contains(accountName.ToUpper()));
+    }
+    if (!string.IsNullOrEmpty(state))
+    {
+        results = results.Where(r => r.State.ToUpper().Contains(state.ToUpper()));
+    }
+    return results.ToList();
+})
 .WithName("GetAllAssets")
-.WithOpenApi();
-
-app.MapGet("/assetsByAccountName", (string accountName, SingletonAssets singletonAssets) =>
+.WithSummary("Get a list of all assets")
+.WithOpenApi(o =>
 {
-    var results = singletonAssets.Assets.Where(a => a.AccountName.Contains(accountName, StringComparison.OrdinalIgnoreCase)).ToList();
-    return results;
-})
-    .WithName("GetAssetsByAccountName")
+    o.Parameters[0].Description = "Name of a country to filter the list of assets";
+    o.Parameters[1].Description = "Name of an account to filter the list of assets";
+    o.Parameters[2].Description = "Name of a state to filter the list of assets";
+    return o;
+});
+
+app.MapGet("/assets/{accountNumber}", (string accountNumber, SalesDb db) =>
+    db.Assets.FirstOrDefault(a => a.AccountNumber.Equals(accountNumber)))
+    .WithName("GetAssetsByAccountNumber")
+    .WithSummary("Get an asset by account number")
+    .WithOpenApi(o =>
+    {
+        o.Parameters[0].Required = true;
+        o.Parameters[0].Description = "Account number of the asset to retrieve";
+        o.Parameters[0].In = Microsoft.OpenApi.Models.ParameterLocation.Path;
+        return o;
+    });
+
+// -- Orders --
+app.MapGet("/orders", (SingletonDatastore singletonDatastore) => singletonDatastore.Orders)
+    .WithName("GetAllOrders")
+    .WithSummary("Get a list of all orders")
     .WithOpenApi();
-
-app.MapGet("/assetsByCountry", (string countryName, SingletonAssets singletonAssets) =>
-{
-    var results = singletonAssets.Assets.Where(a => a.Country.Contains(countryName, StringComparison.OrdinalIgnoreCase)).ToList();
-    return results;
-})
-    .WithName("GetAssetsByCountry")
-    .WithOpenApi();
-
-app.MapGet("/assets/{accountNumber}", (int accountNumber, SingletonAssets singletonAssets) =>
-{
-    //if (accountNumber.HasValue)
-    //{
-    var assets = singletonAssets.Assets.Where(a => a.AccountNumber == accountNumber).ToList();
-    //}
-
-    return Results.Ok(assets);
-})
-.WithName("GetAssetsByAccountNumber")
-.WithOpenApi();
 
 app.Run();
 
